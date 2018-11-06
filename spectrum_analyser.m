@@ -9,7 +9,7 @@ function [ ] = spectrum_analyser( recDeviceID, chanList)
 
 % Increase these values to ensure output stability (ie resilience to
 % glitches) at the expense of a longer latency
-pageSize = 2048;    %size of each page processed
+pageSize = 9600;    %size of each page processed
 pageBufCount = 5;   %number of pages of buffering
 
 fftSize = pageSize * 2;
@@ -52,17 +52,31 @@ end
 
 %Clear all previous pages
 playrec('delPage');
+colors = {'red';'blue'};
 
 fftFigure = figure;
-fftAxes = axes('parent', fftFigure, 'xlimmode', 'manual', 'ylimmode', 'manual', 'xscale', 'log', 'yscale', 'linear', 'xlim', [10 Fs/2], 'ylim', [-60, 60]);
+fftAxes = axes('parent', fftFigure, 'xlimmode', 'manual', 'ylimmode', 'manual', 'xscale', 'log', 'yscale', 'linear', 'xlim', [10 Fs/2], 'ylim', [-150, 0]);
 for i=1:length(chanList)
-    fftLine(i) = line('XData', (0:(fftSize/2))*Fs/fftSize,'YData', ones(1, fftSize/2 + 1));
+    fftLine(i) = line(
+            'XData', (0:(fftSize/2))*Fs/fftSize,
+            'YData', ones(1, fftSize/2 + 1),
+            'Color', char(colors(i)));
 end
+xlabel('Frequency (Hz)', 'fontsize', 10);
+ylabel('Magnitude (dB)', 'fontsize', 10);
+% change the tick labels of the graph from scientific notation to floating point:
+xt = get(gca,'XTick');
+set(gca,'XTickLabel', sprintf('%.0f|',xt))
+addlistener(gca, 'xlim', @logXTickZoomHandler)
 
 timeFigure = figure;
 timeAxes = axes('parent', timeFigure, 'xlimmode', 'manual', 'ylimmode', 'manual', 'xscale', 'linear', 'yscale', 'linear', 'xlim', [1 pageSize], 'ylim', [-1, 1]);
 for i=1:length(chanList)
-    timeLine(i) = line('XData', 1:pageSize,'YData', ones(1, pageSize));
+    timeLine(i) = line(
+        'XData', 1:pageSize,
+        'YData', ones(1, pageSize),
+        'Color', char(colors(i))
+    );
 end
 
 drawnow;
@@ -107,10 +121,17 @@ while(ishandle(fftFigure) || ishandle(timeFigure))
     if(~isempty(lastRecording))
         %very basic processing - windowing would produce a better output
         recSampleBuffer = [recSampleBuffer(length(lastRecording) + 1:end, :); lastRecording];
-        recFFT = fft(recSampleBuffer)';
         if ishandle(fftFigure)
+            winlen = length(recSampleBuffer);
+            winfun = hanning(winlen);
+            recFFT = fft(recSampleBuffer .* winfun)';
             for i=1:length(chanList)
-                set(fftLine(i), 'YData', 20*log10(abs(recFFT(i, 1:fftSize/2 + 1))));
+                set(fftLine(i),
+                    'YData', 20*log10(
+                        abs(recFFT(i, 1:fftSize/2 + 1)) /
+                            (winlen/2 * mean(winfun))
+                    )
+                );
             end
         end
         if ishandle(timeFigure)
@@ -129,4 +150,9 @@ end
     
 %delete all pages now loop has finished
 playrec('delPage');
+endfunction
 
+function logXTickZoomHandler(h)
+  xt = get(h,'XTick');
+  set(h,'XTickLabel', sprintf('%4.0f|',xt))
+endfunction
